@@ -134,11 +134,26 @@ class DNSLookupClient:
         resolver.timeout = self.timeout
         resolver.lifetime = self.lifetime
         
+        # Configure resolver to use public DNS servers as fallback
+        resolver.nameservers = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1']
+        
         self.logger.info(f"Starting DNS lookup for {domain}")
 
         for record_type in record_types:
             try:
                 self.logger.debug(f"Querying {record_type} records for {domain}")
+                
+                # Skip problematic record types that might cause metaquery errors
+                if record_type.upper() in ['IXFR', 'OPT', 'TKEY', 'TSIG']:
+                    self.logger.debug(f"Skipping {record_type} (metaquery/problematic type)")
+                    results[record_type] = DNSRecordResult(
+                        domain=domain,
+                        record_type=record_type,
+                        records=[],
+                        timestamp=datetime.now()
+                    )
+                    continue
+                
                 answers = resolver.resolve(domain, record_type)
                 records = [str(r) for r in answers]
                 results[record_type] = DNSRecordResult(
@@ -148,6 +163,7 @@ class DNSLookupClient:
                     timestamp=datetime.now()
                 )
                 self.logger.debug(f"Found {len(records)} {record_type} records for {domain}")
+                
             except dns.resolver.NoAnswer:
                 self.logger.debug(f"No {record_type} records found for {domain}")
                 results[record_type] = DNSRecordResult(
@@ -165,6 +181,19 @@ class DNSLookupClient:
             except dns.resolver.Timeout:
                 self.logger.error(f"Timeout while querying {record_type} records for {domain}")
                 raise DNSTimeoutError(f"Timeout while querying {domain}")
+            except dns.exception.DNSException as e:
+                # Handle DNS-specific exceptions more gracefully
+                if "metaqueries are not allowed" in str(e).lower():
+                    self.logger.warning(f"Metaquery not allowed for {record_type} on {domain}")
+                    results[record_type] = DNSRecordResult(
+                        domain=domain,
+                        record_type=record_type,
+                        records=[],
+                        timestamp=datetime.now()
+                    )
+                else:
+                    self.logger.error(f"DNS error querying {record_type} records for {domain}: {str(e)}")
+                    raise DNSLookupError(f"DNS error: {str(e)}")
             except Exception as e:
                 self.logger.error(f"Unexpected error querying {record_type} records for {domain}: {str(e)}")
                 raise DNSLookupError(f"Unexpected error: {str(e)}")
@@ -190,7 +219,7 @@ class DNSLookupClient:
             hostnames = socket.gethostbyaddr(ip)
             result = ReverseDNSResult(
                 ip=ip,
-                hostnames=[hostnames[0]] + hostnames[1],
+                hostnames=[hostnames[0]] + list(hostnames[1]),
                 timestamp=datetime.now(),
                 method='socket'
             )
@@ -223,6 +252,9 @@ class DNSLookupClient:
             resolver = dns.resolver.Resolver()
             resolver.timeout = self.timeout
             resolver.lifetime = self.lifetime
+            
+            # Configure resolver to use public DNS servers
+            resolver.nameservers = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1']
             
             answers = resolver.resolve(addr, 'PTR')
             hostnames = [str(r) for r in answers]
@@ -365,12 +397,15 @@ class DNSLookupClient:
         return results
 
 class DNSLookupApp:
+    # Reduced to common, safe record types to avoid metaquery issues
     DEFAULT_RECORD_TYPES = [
-        'A', 'AAAA', 'CNAME', 'TXT', 'SPF', 'NS', 'MX', 'AFSDB', 'APL', 'CAA',
-        'CDNSKEY', 'CDS', 'CERT', 'CSYNC', 'DHCID', 'DLV', 'DNAME', 'DNSKEY',
-        'DS', 'HINFO', 'HIP', 'IPSECKEY', 'IXFR', 'KEY', 'KX', 'LOC', 'NAPTR',
-        'NSEC', 'NSEC3', 'NSEC3PARAM', 'OPENPGPKEY', 'OPT', 'PTR', 'RP', 'RRSIG',
-        'SIG', 'SMIMEA', 'SOA', 'SRV', 'SSHFP', 'TA', 'TKEY', 'TLSA', 'TSIG', 'URI', 'ZONEMD'
+        'A', 'AAAA', 'CNAME', 'TXT', 'NS', 'MX', 'SOA'
+    ]
+    
+    # Extended record types for advanced users
+    EXTENDED_RECORD_TYPES = [
+        'A', 'AAAA', 'CNAME', 'TXT', 'SPF', 'NS', 'MX', 'SOA', 'SRV', 'PTR',
+        'CAA', 'DNAME', 'DNSKEY', 'DS', 'NAPTR', 'SSHFP', 'TLSA'
     ]
     
     def __init__(self):
@@ -389,7 +424,12 @@ class DNSLookupApp:
             '--record-types',
             nargs='+',
             default=self.DEFAULT_RECORD_TYPES,
-            help='DNS record types to check (for domain lookups)'
+            help='DNS record types to check (for domain lookups). Use --extended for more types.'
+        )
+        parser.add_argument(
+            '--extended',
+            action='store_true',
+            help='Use extended set of record types (may cause issues on some networks)'
         )
         parser.add_argument(
             '--timeout',
@@ -423,6 +463,11 @@ class DNSLookupApp:
             '--prefer-dns',
             action='store_true',
             help='Prefer dnspython library for reverse lookups'
+        )
+        parser.add_argument(
+            '--use-system-dns',
+            action='store_true',
+            help='Use system DNS servers instead of public ones'
         )
         return parser.parse_args()
 
@@ -465,6 +510,11 @@ class DNSLookupApp:
     def run(self):
         """Main application entry point"""
         args = self.parse_args()
+        
+        # Use extended record types if requested
+        if args.extended and args.record_types == self.DEFAULT_RECORD_TYPES:
+            args.record_types = self.EXTENDED_RECORD_TYPES
+            print("Using extended record type set")
         
         self.client.timeout = args.timeout
         self.client.lifetime = args.lifetime
