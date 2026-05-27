@@ -1,16 +1,15 @@
-## 📘 DNS Lookup & Reverse Resolution Tool
+## 📘 DNS Lookup & Reverse Resolution Tool (Async Optimized)
 
 ### 🔹 Introduction
 
-This tool is a robust Python-based command-line utility designed for **resolving DNS records** (A, AAAA, MX, TXT, etc.) and performing **reverse DNS lookups** on IP addresses using both the `dnspython` and `socket` libraries. It features:
+This tool is a robust, highly optimized Python command-line utility designed for **resolving DNS records** (A, AAAA, MX, TXT, etc.) and performing **reverse DNS lookups**. 
 
-* Parallel processing for fast bulk queries.
-* Custom logging for detailed event tracking.
-* Built-in domain/IP validation and error handling.
-* Support for all standard DNS record types.
-* CLI interface with multiple options and flags.
+Built entirely with modern Python features, the script has been refactored for **maximum process efficiency and low memory overhead**, leveraging the following technical concepts:
+* **Fully Asynchronous (`asyncio` & `dns.asyncresolver`)**: Eliminates the overhead of OS thread context-switching (replacing `ThreadPoolExecutor`), enabling thousands of concurrent non-blocking I/O queries.
+* **Generator Patterns (`yield`)**: Consumes zero extra memory for output buffers. As queries complete in parallel, they are yielded to the application layer and streamed directly to the terminal interface.
+* **Pythonic Dunder Methods**: Integrates standard Python dunder paradigms (`__str__`, `__repr__`, `__aenter__`, `__aexit__`, `__call__`), allowing the core API client to be robustly managed via async context managers.
 
-Whether you're debugging DNS issues, auditing records, or automating lookups, this tool provides reliable and extensive DNS resolution features.
+Whether you're debugging DNS issues, auditing records, or automating lookups, this tool provides reliable and highly scalable DNS resolution features.
 
 ## 🛠️ How to Use
 
@@ -28,7 +27,7 @@ python dns_lookup.py example.com 8.8.8.8
 | `--record-types`  | DNS record types to fetch (default: all major types) |
 | `--timeout`       | Per-query timeout (default: 5 sec)                   |
 | `--lifetime`      | Total query lifetime (default: 5 sec)                |
-| `--max-workers`   | Max concurrent threads (default: 10)                 |
+| `--max-concurrent`| Max concurrent async tasks (default: 100)            |
 | `--reverse-only`  | Perform only reverse DNS lookups on IPs              |
 | `--prefer-socket` | Prefer `socket` over `dnspython` for reverse lookups |
 | `--prefer-dns`    | Prefer `dnspython` over `socket` for reverse lookups |
